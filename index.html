@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dough Chef Mochi Match</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            touch-action: none;
+            overflow: hidden;
+        }
+        .mochi-glow {
+            filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.4));
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-between h-screen w-screen p-4 select-none">
+
+    <!-- Header / Scoreboard -->
+    <header class="w-full max-w-md flex justify-between items-center bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-slate-700 shadow-xl">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-full bg-pink-500/20 border-2 border-pink-400 flex items-center justify-center text-xl">🍡</div>
+            <div>
+                <h1 class="text-xs text-slate-400 uppercase font-bold tracking-wider">Drop The Loop</h1>
+                <p class="text-lg font-extrabold text-pink-400" id="scoreDisplay">Score: 0</p>
+            </div>
+        </div>
+        <div class="text-right">
+            <span class="text-xs text-slate-400 block uppercase font-bold">Best Chain</span>
+            <span class="text-base font-bold text-amber-400" id="bestDisplay">0</span>
+        </div>
+    </header>
+
+    <!-- Game Canvas Area -->
+    <main class="relative w-full max-w-md flex-1 my-3 bg-slate-900/90 rounded-3xl border-2 border-slate-800 shadow-2xl flex flex-col items-center justify-center overflow-hidden">
+        
+        <!-- Mascot Reaction Overlay / Status -->
+        <div id="mascotMessage" class="absolute top-4 bg-pink-600/90 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg transition-all duration-300 transform scale-0 z-20">
+            Nice Slice! ✨
+        </div>
+
+        <!-- Canvas for interactive slicing and mochi stacking -->
+        <canvas id="gameCanvas" class="w-full h-full cursor-pointer"></canvas>
+
+        <!-- Start Screen Overlay -->
+        <div id="startScreen" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 z-30 text-center">
+            <div class="text-5xl mb-3 animate-bounce">🍡🔪</div>
+            <h2 class="text-2xl font-extrabold text-white mb-2">Dough Chef Mochi Slice</h2>
+            <p class="text-sm text-slate-300 mb-6 max-w-xs">Swipe or drag across matching glowing mochi candies to slice and merge them into higher tiers!</p>
+            <button onclick="startGame()" class="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-extxl font-bold px-8 py-3 rounded-2xl shadow-lg transform transition active:scale-95">
+                Play Now 🚀
+            </button>
+        </div>
+
+        <!-- Game Over Overlay -->
+        <div id="gameOverScreen" class="absolute inset-0 bg-slate-950/85 backdrop-blur-sm hidden flex-col items-center justify-center p-6 z-30 text-center">
+            <div class="text-5xl mb-2">🎉</div>
+            <h2 class="text-2xl font-extrabold text-white mb-1">Great Session!</h2>
+            <p class="text-sm text-slate-300 mb-4">You mastered the mochi slice!</p>
+            <div class="bg-slate-800 p-4 rounded-2xl border border-slate-700 w-48 mb-6">
+                <p class="text-xs text-slate-400 uppercase">Final Score</p>
+                <p class="text-3xl font-extrabold text-pink-400" id="finalScore">0</p>
+            </div>
+            <button onclick="resetGame()" class="bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold px-8 py-3 rounded-2xl shadow-lg transform transition active:scale-95">
+                Play Again 🔄
+            </button>
+        </div>
+    </main>
+
+    <!-- Footer Controls / Info -->
+    <footer class="w-full max-w-md text-center py-2 text-xs text-slate-500">
+        Interactive Web Playable • Optimized for Touch & Mouse
+    </footer>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Resize canvas to container
+        function resizeCanvas() {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let score = 0;
+        let bestScore = 0;
+        let isPlaying = false;
+        let mochiBalls = [];
+        let particles = [];
+        let slicePath = [];
+        let isSlicing = false;
+
+        // Mochi Tiers (Colors and Radii)
+        const mochiTiers = [
+            { radius: 24, color: '#ec4899', core: '#fbcfe8', name: 'Strawberry' },
+            { radius: 30, color: '#8b5cf6', core: '#ddd6fe', name: 'Blueberry' },
+            { radius: 38, color: '#06b6d4', core: '#cffafe', name: 'Neon Soda' },
+            { radius: 46, color: '#f59e0b', core: '#fef3c7', name: 'Golden Honey' }
+        ];
+
+        class Mochi {
+            constructor(x, y, tier) {
+                this.x = x;
+                this.y = y;
+                this.tier = tier;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                this.squishX = 1;
+                this.squishY = 1;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Bounce off walls
+                const r = mochiTiers[this.tier].radius;
+                if (this.x - r < 0 || this.x + r > canvas.width) this.vx *= -1;
+                if (this.y - r < 0 || this.y + r > canvas.height) this.vy *= -1;
+
+                // Spring back squish
+                this.squishX += (1 - this.squishX) * 0.1;
+                this.squishY += (1 - this.squishY) * 0.1;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.scale(this.squishX, this.squishY);
+
+                const tierData = mochiTiers[this.tier];
+                const r = tierData.radius;
+
+                // Outer Glow / Shadow
+                ctx.shadowColor = tierData.color;
+                ctx.shadowBlur = 15;
+
+                // Outer body
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fillStyle = tierData.color;
+                ctx.fill();
+
+                // Inner core translucent highlight
+                ctx.beginPath();
+                ctx.arc(-r * 0.3, -r * 0.3, r * 0.4, 0, Math.PI * 2);
+                ctx.fillStyle = tierData.core;
+                ctx.globalAlpha = 0.6;
+                ctx.fill();
+
+                // Cute Anime Eyes
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.arc(-r * 0.3, -r * 0.1, r * 0.15, 0, Math.PI * 2);
+                ctx.arc(r * 0.3, -r * 0.1, r * 0.15, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.size = Math.random() * 6 + 3;
+                this.vx = (Math.random() - 0.5) * 8;
+                this.vy = (Math.random() - 0.5) * 8;
+                this.alpha = 1;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.alpha -= 0.03;
+            }
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = Math.max(this.alpha, 0);
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function startGame() {
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('gameOverScreen').classList.add('hidden');
+            score = 0;
+            mochiBalls = [];
+            particles = [];
+            updateScore();
+            isPlaying = true;
+
+            // Spawn initial 5 mochi balls
+            for (let i = 0; i < 5; i++) {
+                spawnMochi();
+            }
+        }
+
+        function resetGame() {
+            startGame();
+        }
+
+        function spawnMochi(tier = 0) {
+            const r = mochiTiers[tier].radius;
+            const x = Math.random() * (canvas.width - r * 2) + r;
+            const y = Math.random() * (canvas.height - r * 2) + r;
+            mochiBalls.push(new Mochi(x, y, tier));
+        }
+
+        function updateScore() {
+            document.getElementById('scoreDisplay').innerText = `Score: ${score}`;
+            if (score > bestScore) {
+                bestScore = score;
+                document.getElementById('bestDisplay').innerText = bestScore;
+            }
+        }
+
+        function showMochiMessage(text) {
+            const msg = document.getElementById('mascotMessage');
+            msg.innerText = text;
+            msg.classList.remove('scale-0');
+            setTimeout(() => msg.classList.add('scale-0'), 800);
+        }
+
+        // Touch & Mouse Input Handlers for Slicing
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        canvas.addEventListener('mousedown', (e) => startSlice(getPos(e)));
+        canvas.addEventListener('mousemove', (e) => moveSlice(getPos(e)));
+        window.addEventListener('mouseup', endSlice);
+
+        canvas.addEventListener('touchstart', (e) => { startSlice(getPos(e)); e.preventDefault(); });
+        canvas.addEventListener('touchmove', (e) => { moveSlice(getPos(e)); e.preventDefault(); });
+        window.addEventListener('touchend', endSlice);
+
+        function startSlice(pos) {
+            if (!isPlaying) return;
+            isSlicing = true;
+            slicePath = [pos];
+        }
+
+        function moveSlice(pos) {
+            if (!isSlicing || !isPlaying) return;
+            slicePath.push(pos);
+            if (slicePath.length > 10) slicePath.shift();
+
+            // Check collision with mochi balls
+            const currentPoint = pos;
+            mochiBalls.forEach((mochi, index) => {
+                const dist = Math.hypot(mochi.x - currentPoint.x, mochi.y - currentPoint.y);
+                if (dist < mochiTiers[mochi.tier].radius) {
+                    // Slice triggered!
+                    sliceMochi(index);
+                }
+            });
+        }
+
+        function endSlice() {
+            isSlicing = false;
+            slicePath = [];
+        }
+
+        function sliceMochi(index) {
+            const mochi = mochiBalls[index];
+            score += (mochi.tier + 1) * 10;
+            updateScore();
+
+            // Create explosion particles
+            for (let i = 0; i < 12; i++) {
+                particles.push(new Particle(mochi.x, mochi.y, mochiTiers[mochi.tier].color));
+            }
+
+            // Upgrade or respawn
+            if (mochi.tier < mochiTiers.length - 1) {
+                mochi.tier++;
+                mochi.squishX = 1.4;
+                mochi.squishY = 0.6;
+                showMochiMessage(`Merged to ${mochiTiers[mochi.tier].name}! ✨`);
+            } else {
+                // Max tier popped into bonus score
+                mochiBalls.splice(index, 1);
+                score += 100;
+                showMochiMessage(`MAX POP! +100 🌟`);
+                spawnMochi(0);
+                spawnMochi(0);
+            }
+
+            // Maintain ball count
+            if (mochiBalls.length < 6) {
+                spawnMochi(Math.floor(Math.random() * 2));
+            }
+        }
+
+        // Main Animation Loop
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (isPlaying) {
+                // Update and draw mochi
+                mochiBalls.forEach(m => {
+                    m.update();
+                    m.draw();
+                });
+
+                // Update and draw particles
+                particles.forEach((p, index) => {
+                    p.update();
+                    p.draw();
+                    if (p.alpha <= 0) particles.splice(index, 1);
+                });
+
+                // Draw Slice Trail (Blade effect)
+                if (isSlicing && slicePath.length > 1) {
+                    ctx.save();
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 4;
+                    ctx.shadowColor = '#ec4899';
+                    ctx.shadowBlur = 12;
+                    ctx.beginPath();
+                    ctx.moveTo(slicePath[0].x, slicePath[0].y);
+                    for (let i = 1; i < slicePath.length; i++) {
+                        ctx.lineTo(slicePath[i].x, slicePath[i].y);
+                    }
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
